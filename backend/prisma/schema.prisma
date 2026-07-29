@@ -1,0 +1,106 @@
+// PayFlow Database Schema
+// Database: PostgreSQL via Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Model 1: Book (Catalog Product)
+model Book {
+  id          String      @id @default(uuid())
+  title       String
+  author      String
+  price       Float       // Price in INR (e.g. 599.00)
+  stock       Int         @default(10000) // Default baseline stock of 10000
+  imageUrl    String
+  description String?     @db.Text
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  orderItems  OrderItem[]
+
+  @@map("books")
+}
+
+// Model 2: Customer (Contact details collected at checkout)
+model Customer {
+  id        String   @id @default(uuid())
+  name      String
+  email     String
+  phone     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  orders    Order[]
+
+  @@map("customers")
+}
+
+// Model 3: Order (Core transaction entity)
+enum OrderStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+}
+
+model Order {
+  id              String        @id @default(uuid())
+  razorpayOrderId String?       @unique // Returned by Razorpay API (e.g. order_Kj38fH12)
+  customerId      String
+  customer        Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  totalAmount     Float         // Total amount in INR
+  status          OrderStatus   @default(PENDING)
+  idempotencyKey  String?       @unique
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  items           OrderItem[]
+  payment         Payment?
+  activityLogs    ActivityLog[]
+
+  @@map("orders")
+}
+
+// Model 4: OrderItem (Junction model connecting Orders to Books)
+model OrderItem {
+  id        String   @id @default(uuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  bookId    String
+  book      Book     @relation(fields: [bookId], references: [id])
+  quantity  Int
+  price     Float    // Snapshotted price at checkout time
+  createdAt DateTime @default(now())
+
+  @@map("order_items")
+}
+
+// Model 5: Payment (Verified Payment Transaction record)
+model Payment {
+  id                String   @id @default(uuid())
+  orderId           String   @unique
+  order             Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  razorpayPaymentId String   @unique // Returned by Razorpay Checkout (e.g. pay_Kj38fH99)
+  razorpaySignature String?  // Verified HMAC SHA256 Signature
+  amount            Float
+  status            String   // captured, authorized, failed
+  paymentMethod     String?  // card, upi, netbanking, wallet
+  createdAt         DateTime @default(now())
+
+  @@map("payments")
+}
+
+// Model 6: ActivityLog (Audit trail for event-driven workers)
+model ActivityLog {
+  id        String   @id @default(uuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  event     String   // e.g. "Payment Received", "Inventory Updated", "Invoice Generated", "Email Sent"
+  details   String?  @db.Text
+  createdAt DateTime @default(now())
+
+  @@map("activity_logs")
+}
