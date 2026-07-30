@@ -1,23 +1,14 @@
 import PDFDocument from 'pdfkit';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import prisma from '../config/db.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const INVOICES_DIR = path.join(__dirname, '..', 'invoices');
-
-if (!fs.existsSync(INVOICES_DIR)) {
-  fs.mkdirSync(INVOICES_DIR, { recursive: true });
-}
+import { StorageService } from '../services/storage.service.js';
 
 /**
- * Worker 2 — Executive PDF Invoice Generator
- * 
- * Generates an ultra-professional, corporate PDF invoice with modern typography,
- * executive colors, itemized breakdown, and Razorpay verification badges.
+ * -----------------------------------------------------------------------------
+ * 📄 BULLMQ WORKER 2 — EXECUTIVE PDF INVOICE GENERATOR & S3 STORAGE
+ * -----------------------------------------------------------------------------
+ * Generates an executive-level corporate PDF tax invoice in memory using PDFKit
+ * and uploads it to AWS S3 (or fallback local storage).
+ * Updates PostgreSQL Order table with the persistent invoice URL.
  */
 export const processInvoiceGeneration = async (orderId) => {
   console.log(`📄 [Worker 2: Invoice] Generating executive PDF invoice for Order #${orderId}...`);
@@ -37,13 +28,16 @@ export const processInvoiceGeneration = async (orderId) => {
     throw new Error(`[Worker 2] Order #${orderId} not found`);
   }
 
-  const pdfPath = path.join(INVOICES_DIR, `invoice_${order.id}.pdf`);
-
-  await new Promise((resolve, reject) => {
+  // ---------------------------------------------------------------------------
+  // STEP 1: GENERATE PDF IN-MEMORY BUFFER
+  // ---------------------------------------------------------------------------
+  const pdfBuffer = await new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 40, size: 'A4' });
-    const stream = fs.createWriteStream(pdfPath);
+    const chunks = [];
 
-    doc.pipe(stream);
+    doc.on('data', (chunk) => chunks.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
 
     // Primary Brand Colors
     const primaryColor = '#4338ca'; // Indigo 700
@@ -201,20 +195,32 @@ export const processInvoiceGeneration = async (orderId) => {
       .text('This is a computer-generated tax invoice. Signature verified via Razorpay HMAC SHA256 Engine.', 40, 750, { align: 'center' });
 
     doc.end();
+  });
 
-    stream.on('finish', resolve);
-    stream.on('error', reject);
+  // ---------------------------------------------------------------------------
+  // STEP 2: UPLOAD TO AWS S3 / STORAGE PROVIDER
+  // ---------------------------------------------------------------------------
+  const s3Key = `invoices/invoice_${order.id}.pdf`;
+  const uploadResult = await StorageService.uploadInvoice(pdfBuffer, s3Key, 'application/pdf');
+  const { invoiceUrl, storageProvider } = uploadResult;
+
+  // ---------------------------------------------------------------------------
+  // STEP 3: PERSIST INVOICE LINK TO DATABASE
+  // ---------------------------------------------------------------------------
+  await prisma.order.update({
+    where: { id: order.id },
+    data: { invoiceUrl }
   });
 
   // Record activity audit log
   await prisma.activityLog.create({
     data: {
       orderId: order.id,
-      event: 'Invoice Generated',
-      details: `Executive PDF Invoice saved at backend/invoices/invoice_${order.id}.pdf`
+      event: 'Invoice Uploaded to S3',
+      details: `Executive PDF Invoice uploaded to ${storageProvider}: ${invoiceUrl}`
     }
   });
 
-  console.log(`✅ [Worker 2: Invoice] Executive PDF Invoice generated for Order #${orderId}`);
-  return { success: true, pdfPath };
+  console.log(`✅ [Worker 2: Invoice] PDF Invoice saved & linked in DB for Order #${orderId} (${invoiceUrl})`);
+  return { success: true, invoiceUrl, storageProvider };
 };

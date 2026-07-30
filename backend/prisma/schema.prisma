@@ -55,6 +55,7 @@ model Order {
   totalAmount     Float         // Total amount in INR
   status          OrderStatus   @default(PENDING)
   idempotencyKey  String?       @unique
+  invoiceUrl      String?       // AWS S3 Public/Presigned URL for PDF invoice
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   items           OrderItem[]

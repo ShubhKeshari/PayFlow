@@ -101,6 +101,14 @@ export const processEmailNotification = async (orderId) => {
         <p style="margin: 4px 0; font-size: 14px; color: #047857;"><strong>Total Amount Paid:</strong> ₹${order.totalAmount.toFixed(2)}</p>
       </div>
 
+      ${order.invoiceUrl ? `
+      <div style="text-align: center; margin: 20px 0;">
+        <a href="${order.invoiceUrl}" target="_blank" style="background-color: #4338ca; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 13px; display: inline-block;">
+          📄 Download Tax Invoice (AWS S3)
+        </a>
+      </div>
+      ` : ''}
+
       <h3 style="font-size: 15px; color: #0f172a; margin-top: 24px; margin-bottom: 12px;">Purchased Items</h3>
       <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
         <thead>
